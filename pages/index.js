@@ -2,9 +2,8 @@ import Head from "next/head";
 
 import React, { useEffect, useState } from "react";
 import _ from "lodash";
-
-import { wordsDictionary } from "./words";
-import { LetterComponent } from "./letterComponent";
+import { wordsDictionary } from "@components/words";
+import { LetterComponent } from "@components/letterComponent";
 
 export default function Home() {
   const [operationMap, setOperationMap] = useState({});
