@@ -1,417 +1,554 @@
 import Head from "next/head";
-import React from "react";
-import { useState, useEffect } from "react";
+
+import React, { useEffect, useState } from "react";
 import _ from "lodash";
 
-const Home = () => {
-  const [ticker, setTicker] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [bestTimes, setBestTimes] = useState();
-  const [error, setError] = useState();
-  const [totalDays, setTotalDays] = useState();
+import { wordsDictionary } from "./words";
+import { LetterComponent } from "./letterComponent";
 
-  const API_KEY = "oJAKhAGysdLDX4xrHja2IozkxPFMx9CJ";
+export default function Home() {
+  const [operationMap, setOperationMap] = useState({});
+  const [currentWords, setCurrentWords] = useState(wordsDictionary);
+  //This is a list of letters and positions which are forbidden (yellow) [2, "a"]
+  const [forbiddenLetters, setForbiddenLetters] = useState();
+  //This is a list of letters and positions which are known (green) [3, "g"]
+  const [forbiddenLocations, setForbiddenLocations] = useState();
+  const [knownLetters, setKnownLetters] = useState();
+  const [letters, setLetters] = useState([
+    ["arose"],
+    ["until"],
+    [],
+    [],
+    [],
+    [],
+  ]);
+  const [nextStep, setNextStep] = useState(false);
+  const [oops, setOops] = useState(false);
 
-  useEffect(() => {
-    if (ticker) {
-      fetchData(ticker);
-    }
-  }, [ticker]);
-
-  const fetchData = (tickerSymbol) => {
-    setLoading(true);
-
-    let currentMilliseconds = new Date().getTime();
-    let pastMilliseconds = currentMilliseconds - 2629800000;
-
-    let count = 1;
-
-    const fetchedData = [];
-
-    while (count < 13) {
-      const convertedCurrent = new Date(currentMilliseconds)
-        .toISOString()
-        .split("T")[0];
-      const convertedPast = new Date(pastMilliseconds)
-        .toISOString()
-        .split("T")[0];
-
-      const apiString = `https://api.polygon.io/v2/aggs/ticker/${tickerSymbol}/range/1/hour/${convertedPast}/${convertedCurrent}?&sort=asc&limit=50000&apiKey=${API_KEY}`;
-
-      fetch(apiString)
-        .then((response) => response.json())
-        .then(({ results }) => {
-          console.log("fetching...");
-          results.forEach(({ h, t }) => {
-            let time = new Date(t).toISOString().split("T")[1].split(":")[0];
-
-            if (Number(time) <= 17 && Number(time) > 8) {
-              if (Number(time) > 12) {
-                time = `${Number(time) - 12}:00`;
-              }
-
-              if (Number(time) < 12) {
-                if (Number(time) === 9) {
-                  time = "9:30";
-                }
-
-                if (Number(time) > 9) time = `${Number(time)}:00`;
-              }
-
-              if (Number(time) === 12) {
-                time = "12:00";
-              }
-
-              fetchedData.push({
-                time,
-                price: h,
-                date: new Date(t).toISOString().split("T")[0],
-              });
-            }
-          });
-        })
-        .catch((error) => {
-          setLoading(false);
-          setError(error);
-        });
-
-      currentMilliseconds = pastMilliseconds;
-      pastMilliseconds -= 2629800000;
-      count += 1;
-    }
-
-    setTimeout(() => {
-      parseData(fetchedData);
-    }, 2500);
-  };
-
-  const parseData = (data) => {
-    console.log("parsing...");
-    const bestTimeObject = {
-      "1:00": 0,
-      "2:00": 0,
-      "3:00": 0,
-      "4:00": 0,
-      "5:00": 0,
-      "9:30": 0,
-      "10:00": 0,
-      "11:00": 0,
-      "12:00": 0,
+  const letterAnalyzer = (wordList, position) => {
+    const letterSet = {
+      q: 0,
+      w: 0,
+      e: 0,
+      r: 0,
+      t: 0,
+      y: 0,
+      u: 0,
+      i: 0,
+      o: 0,
+      p: 0,
+      a: 0,
+      s: 0,
+      d: 0,
+      f: 0,
+      g: 0,
+      h: 0,
+      j: 0,
+      k: 0,
+      l: 0,
+      z: 0,
+      x: 0,
+      c: 0,
+      v: 0,
+      b: 0,
+      n: 0,
+      m: 0,
     };
-    let dayCount = 0;
-    let currentDate = data[0].date;
 
-    let temporaryTimes = {};
+    wordList.forEach((word) => {
+      const letter = word[position];
 
-    data.forEach(({ time, price, date }) => {
-      if (date !== currentDate) {
-        currentDate = date;
-        dayCount += 1;
-
-        //calculate the best time
-        let maxValue = 999999999999;
-        let maxKey = "";
-
-        Object.keys(temporaryTimes).forEach((key) => {
-          const value = Number(temporaryTimes[key]);
-          if (value < maxValue) {
-            maxValue = value;
-            maxKey = key;
-          }
-        });
-
-        bestTimeObject[maxKey] += 1;
-
-        temporaryTimes = {};
-      }
-
-      temporaryTimes[time] = Number(price);
+      letterSet[letter] = letterSet[letter] + 1;
     });
 
-    setBestTimes(bestTimeObject);
-    setTotalDays(dayCount);
-    setLoading(false);
+    return letterSet;
   };
 
-  const renderSelect = () => {
-    if (error) {
-      return error;
+  const calculateLikelihoodOfWords = (allowedWords) => {
+    //For each position, calculate a likelihood table
+    const position0 = letterAnalyzer(allowedWords, 0);
+    const position1 = letterAnalyzer(allowedWords, 1);
+    const position2 = letterAnalyzer(allowedWords, 2);
+    const position3 = letterAnalyzer(allowedWords, 3);
+    const position4 = letterAnalyzer(allowedWords, 4);
+
+    let greatestWord = "";
+    let greatestScore = 0;
+
+    //For each allowed word, calculate the likelihood score, which is the likelihood of every letter
+    allowedWords.forEach((currentWord) => {
+      let wordScore = 0;
+
+      Array.from(currentWord).forEach((letter, index) => {
+        if (index === 0) {
+          wordScore += position0[letter];
+          return;
+        }
+        if (index === 1) {
+          wordScore += position1[letter];
+          return;
+        }
+        if (index === 2) {
+          wordScore += position2[letter];
+          return;
+        }
+        if (index === 3) {
+          wordScore += position3[letter];
+          return;
+        }
+        if (index === 4) {
+          wordScore += position4[letter];
+          return;
+        }
+      });
+      if (wordScore > greatestScore) {
+        greatestScore = wordScore;
+        greatestWord = currentWord;
+      }
+    });
+
+    let settingIndex = 0;
+    letters.forEach((individualLetter, index) => {
+      if (_.isEmpty(individualLetter) && settingIndex === 0) {
+        settingIndex = index;
+      }
+    });
+
+    const lettersCopy = [...letters];
+    lettersCopy[settingIndex] = [greatestWord];
+
+    setForbiddenLetters([]);
+    setLetters(lettersCopy);
+    setNextStep(false);
+  };
+
+  const filterWords = () => {
+    const wordCheckList = [];
+
+    currentWords.map((currentWord) => {
+      if (forbiddenLetters.every((letter) => !currentWord.includes(letter))) {
+        if (
+          forbiddenLocations.every((location) => {
+            const forbiddenLocation = location[0];
+            const forbiddenLocationLetter = location[1];
+
+            if (!!!forbiddenLocations.length) {
+              return true;
+            }
+
+            if (currentWord[forbiddenLocation] === forbiddenLocationLetter) {
+              return false;
+            }
+
+            return true;
+          })
+        ) {
+          if (forbiddenLetterExistenceCheck) {
+            if (knownLetterCheck(currentWord)) {
+              wordCheckList.push(currentWord);
+            }
+          }
+        }
+      }
+    });
+
+    calculateLikelihoodOfWords(wordCheckList);
+    setCurrentWords(wordCheckList);
+  };
+
+  const forbiddenLetterExistenceCheck = (word) => {
+    //word needs to include all of the letters
+
+    return forbiddenLocations.every((letterTuple) => {
+      const letterTupleLetter = letterTuple[1];
+      word.includes(letterTupleLetter);
+    });
+  };
+
+  const knownLetterCheck = (word) => {
+    if (
+      knownLetters.every((knownLetter) => {
+        const knownLocation = knownLetter[0];
+        const knownLocationLetter = knownLetter[1];
+
+        if (knownLocationLetter === word[knownLocation]) {
+          return true;
+        }
+
+        if (!!!knownLetters.length) {
+          return true;
+        }
+        if (word[knownLocation] !== knownLocationLetter) {
+          return false;
+        }
+      })
+    ) {
+      return true;
     }
 
-    if (loading) {
-      return null;
+    return false;
+  };
+
+  useEffect(() => {
+    const totalWords = letters.filter(
+      (guessedWords) => !_.isEmpty(guessedWords)
+    ).length;
+
+    const colouredWords = Object.keys(operationMap).length;
+
+    if (colouredWords / 5 > 5) {
+      setOops(true);
+      return;
     }
+
+    if (colouredWords / 5 === totalWords) {
+      //go through all the operations and set the respective fields
+
+      const temporaryForbiddenLetters = [];
+      const temporaryForbiddenLocations = [];
+      const temporaryKnownLetters = [];
+      const goodLetters = [];
+
+      Object.keys(operationMap).forEach((key) => {
+        const currentData = operationMap[key];
+
+        const operatedIndex = currentData[1];
+        const operatedLetter = currentData[0][operatedIndex];
+        const operation = currentData[2];
+
+        if (operation === "green") {
+          temporaryKnownLetters.push([operatedIndex, operatedLetter]);
+          goodLetters.push(operatedLetter);
+        }
+        if (operation === "yellow") {
+          temporaryForbiddenLocations.push([operatedIndex, operatedLetter]);
+        }
+        if (operation === "gray") {
+          temporaryForbiddenLetters.push(operatedLetter);
+        }
+      });
+
+      //BUG ALERT
+      //If a word is BOTH within the known letters, it cannot be in the forbidden letters in the case of a double letter
+
+      //Maybe have that as a forbidden location in the future?
+
+      //for now, just filter it out
+
+      const filteredForbiddenLetters = temporaryForbiddenLetters.filter(
+        (filteredForbidden) => {
+          return !goodLetters.includes(filteredForbidden);
+        }
+      );
+
+      setForbiddenLetters(filteredForbiddenLetters);
+      setForbiddenLocations(temporaryForbiddenLocations);
+      setKnownLetters(temporaryKnownLetters);
+
+      setNextStep(true);
+    }
+  }, [operationMap]);
+
+  useEffect(() => {
+    if (nextStep && !oops) filterWords();
+  }, [forbiddenLocations, forbiddenLetters, knownLetters]);
+
+  const renderKeyboard = () => {
+    const letterSet = {
+      q: "lightgray",
+      w: "lightgray",
+      e: "lightgray",
+      r: "lightgray",
+      t: "lightgray",
+      y: "lightgray",
+      u: "lightgray",
+      i: "lightgray",
+      o: "lightgray",
+      p: "lightgray",
+      a: "lightgray",
+      s: "lightgray",
+      d: "lightgray",
+      f: "lightgray",
+      g: "lightgray",
+      h: "lightgray",
+      j: "lightgray",
+      k: "lightgray",
+      l: "lightgray",
+      z: "lightgray",
+      x: "lightgray",
+      c: "lightgray",
+      v: "lightgray",
+      b: "lightgray",
+      n: "lightgray",
+      m: "lightgray",
+    };
+
+    Object.values(operationMap).forEach((operation) => {
+      const key = operation[0][operation[1]];
+      const color = operation[2];
+
+      letterSet[key] = color;
+    });
 
     return (
-      <select value={ticker} onChange={({ target }) => setTicker(target.value)}>
-        <option value={"SPY"}>SPY</option>
-        <option value={"QQQ"}>QQQ</option>
-        <option value={"TQQQ"}>TQQQ</option>
-        <option value={"XLK"}>XLK</option>
-        <option value={"TSLA"}>TSLA</option>
-        <option value={"FB"}>FB</option>
-        <option value={"GOOG"}>GOOG</option>
-        <option value={"AAPL"}>AAPL</option>
-        <option value={"SNAP"}>SNAP</option>
-        <option value={"TWTR"}>TWTR</option>
-        <option value={"ARKG"}>ARKG</option>
-        <option value={"GS"}>GS</option>
-      </select>
+      <div className="keyboardContainer">
+        <div className="keyboardRow">
+          <div className={`keyboardSquare ${letterSet["q"]}Box`}>q</div>
+          <div className={`keyboardSquare ${letterSet["w"]}Box`}>w</div>
+          <div className={`keyboardSquare ${letterSet["e"]}Box`}>e</div>
+          <div className={`keyboardSquare ${letterSet["r"]}Box`}>r</div>
+          <div className={`keyboardSquare ${letterSet["t"]}Box`}>t</div>
+          <div className={`keyboardSquare ${letterSet["y"]}Box`}>y</div>
+          <div className={`keyboardSquare ${letterSet["u"]}Box`}>u</div>
+          <div className={`keyboardSquare ${letterSet["i"]}Box`}>i</div>
+          <div className={`keyboardSquare ${letterSet["o"]}Box`}>o</div>
+          <div className={`keyboardSquare ${letterSet["p"]}Box`}>p</div>
+        </div>
+        <div className="keyboardRow">
+          <div className={`keyboardSquare ${letterSet["a"]}Box`}>a</div>
+          <div className={`keyboardSquare ${letterSet["s"]}Box`}>s</div>
+          <div className={`keyboardSquare ${letterSet["d"]}Box`}>d</div>
+          <div className={`keyboardSquare ${letterSet["f"]}Box`}>f</div>
+          <div className={`keyboardSquare ${letterSet["g"]}Box`}>g</div>
+          <div className={`keyboardSquare ${letterSet["h"]}Box`}>h</div>
+          <div className={`keyboardSquare ${letterSet["k"]}Box`}>j</div>
+          <div className={`keyboardSquare ${letterSet["k"]}Box`}>k</div>
+          <div className={`keyboardSquare ${letterSet["l"]}Box`}>l</div>
+        </div>
+        <div className="keyboardRow">
+          <div className={`keyboardSquare ${letterSet["z"]}Box`}>z</div>
+          <div className={`keyboardSquare ${letterSet["x"]}Box`}>x</div>
+          <div className={`keyboardSquare ${letterSet["c"]}Box`}>c</div>
+          <div className={`keyboardSquare ${letterSet["v"]}Box`}>v</div>
+          <div className={`keyboardSquare ${letterSet["b"]}Box`}>b</div>
+          <div className={`keyboardSquare ${letterSet["n"]}Box`}>n</div>
+          <div className={`keyboardSquare ${letterSet["m"]}Box`}>m</div>
+        </div>
+      </div>
     );
   };
 
-  const renderCaption = () => {
-    if (loading) {
-      return (
-        <>
-          <p className="loading">Loading and calculating statistics...</p>
-          <style jsx>{`
-            .loading {
-              line-height: 1.5;
-              font-size: 1.5rem;
-              animation: move 0.5s infinite;
-              transition: 0.1s;
-            }
+  const renderGrid = () => {
+    const renderLetters = (word) => {
+      return Array.from(word).map((wordLetter, index) => {
+        return (
+          <LetterComponent
+            word={word}
+            index={index}
+            map={operationMap}
+            setFunction={setOperationMap}
+          />
+        );
+      });
+    };
 
-            @keyframes move {
-              0% {
-                transform: translateX(10px);
-              }
-              49% {
-                transform: translateX(20px);
-              }
-              50% {
-                transform: translateX(20px);
-              }
-              100% {
-                transform: translateX(10px);
-              }
-            }
-          `}</style>
-        </>
+    return letters.map((word) => {
+      if (_.isEmpty(word)) {
+        return (
+          <div className="rowContainer">
+            <div className="letterContainer"></div>
+            <div className="letterContainer"></div>
+            <div className="letterContainer"></div>
+            <div className="letterContainer"></div>
+            <div className="letterContainer"></div>
+          </div>
+        );
+      }
+
+      return <div className="rowContainer">{renderLetters(word[0])}</div>;
+    });
+  };
+
+  const renderPrompt = () => {
+    if (oops) {
+      return (
+        <div className="prompt">
+          Hmmm, I don't know that word! You've stumped me!
+        </div>
       );
     }
 
-    if (!bestTimes && !totalDays) {
+    const totalWords = letters.filter(
+      (guessedWords) => !_.isEmpty(guessedWords)
+    ).length;
+
+    if (totalWords === 2) {
       return (
-        <>
-          <p className="description">
-            <>
-              Select a stock ticker, and I'll go through the past year and
-              calculate it for you!
-            </>
-            <br />
-            <>(Past trends don't guarantee future trends thoooooooo)</>
-          </p>
-          <style jsx>{`
-            .description {
-              line-height: 1.5;
-              font-size: 1.5rem;
-            }
-          `}</style>
-        </>
+        <div className="prompt">
+          Enter these two words into Wordle, and then set their colours by
+          clicking on them!
+        </div>
       );
     }
 
-    const bestTimesArray = Object.keys(bestTimes)
-      .map((key) => ({
-        key,
-        times: bestTimes[key],
-      }))
-      .sort((a, b) => b.times - a.times);
-
-    const absoluteBest = bestTimesArray[0];
-    const secondBest = bestTimesArray[1];
+    const currentWord = letters[totalWords - 1];
 
     return (
-      <>
-        <p className="description">
-          <>
-            {`${((100 * absoluteBest.times) / totalDays).toFixed(
-              2
-            )}% of the time, the best time to buy the ${ticker} is at ${
-              absoluteBest.key
-            }!`}
-          </>
-          <br />
-          <>{`Btw, ${((100 * secondBest.times) / totalDays).toFixed(
-            2
-          )}% of the time, it would be better to buy at ${secondBest.key}`}</>
-        </p>
-        <style jsx>{`
-          .description {
-            line-height: 1.5;
-            font-size: 1.5rem;
-          }
-        `}</style>
-      </>
+      <div className="prompt">
+        {`I think the next word might be ${currentWord[0].toUpperCase()}!`}
+      </div>
     );
   };
 
   return (
-    <div className="container">
+    <div className="mainContainer">
       <Head>
-        <title>Backtesting is fun</title>
-        <link rel="icon" href="/favicon.ico" />
+        <title className="title">Solve Wordle!</title>
       </Head>
 
       <main>
-        <h1 className="title">
-          Let's backtest the best time for a recurring purchase!
-        </h1>
-        {renderCaption()}
-        {renderSelect()}
+        <h1 className="title">Wordle Solver!</h1>
+        {renderPrompt()}
+        <div className="gridContainer">{renderGrid()}</div>
+        {renderKeyboard()}
       </main>
 
-      <footer>haha, not financial advice</footer>
+      <div className="footer">
+        this was made by a software engineer at 10xGenomics who really enjoys
+        wordle
+      </div>
 
       <style jsx>{`
-        .container {
-          min-height: 100vh;
-          padding: 0 0.5rem;
+        .mainContainer {
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          align-items: center;
-        }
-
-        main {
-          padding: 5rem 0;
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-        }
-
-        footer {
-          width: 100%;
-          height: 100px;
-          border-top: 1px solid #eaeaea;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-        }
-
-        footer img {
-          margin-left: 0.5rem;
-        }
-
-        footer a {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-        }
-
-        a {
-          color: inherit;
-          text-decoration: none;
-        }
-
-        .title a {
-          color: #0070f3;
-          text-decoration: none;
-        }
-
-        .title a:hover,
-        .title a:focus,
-        .title a:active {
-          text-decoration: underline;
+          justify-content: space-between;
+          height: 95%;
         }
 
         .title {
-          margin: 0;
-          line-height: 1.15;
-          font-size: 4rem;
-        }
-
-        .title,
-        .description {
-          text-align: center;
-        }
-
-        .description {
-          line-height: 1.5;
-          font-size: 1.5rem;
-        }
-
-        code {
-          background: #fafafa;
-          border-radius: 5px;
-          padding: 0.75rem;
-          font-size: 1.1rem;
-          font-family: Menlo, Monaco, Lucida Console, Liberation Mono,
-            DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
-        }
-
-        .grid {
           display: flex;
-          align-items: center;
           justify-content: center;
-          flex-wrap: wrap;
-
-          max-width: 800px;
-          margin-top: 3rem;
         }
 
-        .card {
-          margin: 1rem;
-          flex-basis: 45%;
-          padding: 1.5rem;
-          text-align: left;
-          color: inherit;
-          text-decoration: none;
-          border: 1px solid #eaeaea;
-          border-radius: 10px;
-          transition: color 0.15s ease, border-color 0.15s ease;
+        .footer {
+          display: flex;
+          justify-content: center;
+          font-style: italic;
+          color: gray;
         }
 
-        .card:hover,
-        .card:focus,
-        .card:active {
-          color: #0070f3;
-          border-color: #0070f3;
-        }
-
-        .card h3 {
-          margin: 0 0 1rem 0;
-          font-size: 1.5rem;
-        }
-
-        .card p {
-          margin: 0;
-          font-size: 1.25rem;
-          line-height: 1.5;
-        }
-
-        .logo {
-          height: 1em;
-        }
-
-        @media (max-width: 600px) {
-          .grid {
-            width: 100%;
-            flex-direction: column;
-          }
+        .gridContainer {
+          margin-top: 2rem;
         }
       `}</style>
 
       <style jsx global>{`
-        html,
+
+        .keyboardContainer {
+          margin-top: 2.5rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .keyboardRow {
+          display: flex;
+          flex-direction: row;
+          gap: 0.5rem;
+          justify-content: center;
+        }
+
+        .letterContainer {
+          width: 2rem;
+          height: 2rem;
+          padding: 0.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 2px solid lightgray;
+          flex-direction: column;
+          text-transform: uppercase;
+          font-weight: 700;
+        }
+
+        .keyboardSquare {
+          width: 2rem;
+          height: 2rem;
+          padding: 0.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 2px solid lightgray;
+          flex-direction: column;
+          text-transform: uppercase;
+          font-weight: 700;
+        }
+
+        .popoverContainer {
+          display: flex;
+          flex-direction: row;
+          padding .5rem;
+          gap: .5rem;
+          margin-bottom: .5rem;
+        }
+
+        .graySquare {
+          background-color: gray;
+        }
+
+        .yellowSquare {
+          background-color: #c9b458;
+        }
+
+        .greenSquare {
+          background-color: #6aaa64;
+        }
+
+        .grayBox {
+          background-color: gray;
+          color: white;
+        }
+
+        .yellowBox {
+          background-color: #c9b458;
+          color: white;
+        }
+
+        .greenBox {
+          background-color: #6aaa64;
+          color: white;
+        }
+
+        .square {
+          width: 1.5rem;
+          height: 1.5rem;
+          border: 2px solid white;
+          box-shadow: 10px 5px 5px gray;
+        }
+
+        .square:hover {
+          border: 2px solid black;
+        }
+
+        .prompt {
+          display: flex;
+          justify-content: center;
+          width: 70vw;
+          font-size: 1.25rem;
+        }
+
+        .letterContainer:hover {
+          border: 2px solid black;
+        }
+
+        .rowContainer {
+          display: flex;
+          flex-direction: row;
+          padding: 0.15rem;
+          gap: 0.3rem;
+          justify-content: center;
+        }
+
         body {
-          padding: 0;
-          margin: 0;
+          display: flex;
+          height: 100vh;
+          justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto,
             Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue,
             sans-serif;
         }
-
-        * {
-          box-sizing: border-box;
-        }
       `}</style>
     </div>
   );
-};
-
-export default Home;
+}
